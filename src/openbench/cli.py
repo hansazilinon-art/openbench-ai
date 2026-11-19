@@ -2058,6 +2058,24 @@ def _handle_providers(args: argparse.Namespace) -> int:
     return 2
 
 
+def _resolve_format(args: argparse.Namespace, supported: tuple[str, ...]) -> str:
+    """Pick the report format: an explicit ``--format`` wins, otherwise the
+    ``--output`` extension decides. ``dataset-card`` has no CSV, so the caller
+    lists the formats it supports; ``rank`` supports CSV too."""
+    if args.format is not None:
+        return args.format
+    suffix = Path(args.output).suffix.lower() if args.output else ""
+    mapping = {
+        ".html": "html",
+        ".htm": "html",
+        ".json": "json",
+        ".csv": "csv" if "csv" in supported else "markdown",
+        ".md": "markdown",
+        ".markdown": "markdown",
+    }
+    return mapping.get(suffix, "markdown")
+
+
 def _write_or_print(text: str, output: str | None, label: str) -> None:
     from openbench.security import validate_safe_output_path
 
@@ -2105,13 +2123,14 @@ def _handle_rank(args: argparse.Namespace) -> int:
         arms, args.metric, alpha=args.alpha, confidence_level=args.confidence_level, resamples=args.resamples,
         permutations=args.permutations, analysis_seed=args.seed, selected_ids=selected, allow_incompatible=args.exploratory,
     )
-    if args.format == "html":
+    card_format = _resolve_format(args, ("json", "markdown", "csv", "html"))
+    if card_format == "html":
         from openbench.html_report import render_html
 
         text = render_html(redact_sensitive_data(payload))
     else:
-        text = render_ranking(redact_sensitive_data(payload), args.format)
-    _write_or_print(text, args.output, f"Ranking ({args.format})")
+        text = render_ranking(redact_sensitive_data(payload), card_format)
+    _write_or_print(text, args.output, f"Ranking ({card_format})")
     if payload.get("banner"):
         print(f"Warning: {payload['banner']}", file=sys.stderr)
     return 0
@@ -2321,10 +2340,7 @@ def _handle_dataset_card(args: argparse.Namespace) -> int:
     """`openbench dataset-card` (v0.5.0)."""
     from openbench.datacard import build_card, render_card
 
-    card_format = args.format
-    if card_format is None:
-        suffix = Path(args.output).suffix.lower() if args.output else ""
-        card_format = {".html": "html", ".htm": "html", ".json": "json"}.get(suffix, "markdown")
+    card_format = _resolve_format(args, ("markdown", "json", "html"))
     card = build_card(args.dataset_path)
     _write_or_print(render_card(card, card_format), args.output, f"Dataset card ({card_format})")
     return 0
